@@ -3,8 +3,10 @@
 
 use axum::{routing::get, Router};
 
+use crate::state::AppState;
+
 mod home;
 
-pub fn router() -> Router {
+pub fn router() -> Router<AppState> {
     Router::new().route("/", get(home::index))
 }

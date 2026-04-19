@@ -1,10 +1,27 @@
 {% extends "base.html" %}
 
-{% block title %}omnidrive{% endblock %}
+{% block title %}omnidrive — connected accounts{% endblock %}
 
 {% block content %}
   <section>
-    <h2>Hello from omnidrive</h2>
-    <p>Template rendering works. In the next milestone we'll start tracking connected Google accounts.</p>
+    <h2>Connected accounts</h2>
+    {% if accounts.is_empty() %}
+      <div class="empty">
+        <p>No accounts connected yet.</p>
+        <a class="btn" href="/oauth/start">Add Google account</a>
+      </div>
+    {% else %}
+      {# Populated state is fully styled in M5 when we can actually add accounts. #}
+      <ul class="accounts">
+        {% for account in accounts %}
+          <li class="account">
+            <div class="email">{{ account.email }}</div>
+          </li>
+        {% endfor %}
+      </ul>
+      <p style="margin-top: 1.5rem;">
+        <a class="btn" href="/oauth/start">Add another account</a>
+      </p>
+    {% endif %}
   </section>
 {% endblock %}

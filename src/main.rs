@@ -1,15 +1,22 @@
 // omnidrive — entry point.
 //
-// M2: minimum viable web app. Boot an Axum server on 127.0.0.1:8765 and serve
-// a single Askama-rendered page. DB + OAuth arrive in later milestones.
+// M3: wire up SQLite. Open the database at startup, run migrations, stash the
+// connection in AppState so handlers can query it. OAuth lands in M4.
 
 use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
+mod db;
+mod error;
+mod models;
 mod routes;
+mod state;
+
+use state::AppState;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -27,7 +34,16 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|_| "127.0.0.1:8765".to_string())
         .parse()?;
 
-    let app = routes::router().layer(TraceLayer::new_for_http());
+    // Open SQLite (creates on first run).
+    let conn = db::init()?;
+
+    let state = AppState {
+        db: Arc::new(Mutex::new(conn)),
+    };
+
+    let app = routes::router()
+        .with_state(state)
+        .layer(TraceLayer::new_for_http());
 
     tracing::info!("omnidrive listening on http://{bind_addr}");
 
