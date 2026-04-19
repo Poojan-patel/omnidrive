@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block title %}omnidrive{% endblock %}</title>
+  <!-- HTMX from CDN for now; we'll vendor it locally as a polish item later. -->
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      max-width: 720px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+      line-height: 1.5;
+    }
+    h1 { margin-bottom: 0.25rem; }
+    .tagline { color: #666; margin-top: 0; }
+    .empty {
+      padding: 2rem;
+      text-align: center;
+      border: 1px dashed #999;
+      border-radius: 8px;
+      color: #666;
+    }
+    .btn {
+      display: inline-block;
+      padding: 0.5rem 1rem;
+      background: #1a73e8;
+      color: white;
+      text-decoration: none;
+      border-radius: 4px;
+      font-weight: 500;
+    }
+    .btn:hover { background: #1558b8; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>omnidrive</h1>
+    <p class="tagline">Search across all your Google Drives.</p>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
