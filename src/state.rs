@@ -1,15 +1,31 @@
 // App-wide shared state. Injected into every handler via axum's State extractor.
 //
-// For M3 this holds only the SQLite connection behind Arc<Mutex<...>>. M4
-// extends it with the OAuth client and in-flight-auth tracking.
-//
-// Rusqlite is sync, so handlers take the lock inside `spawn_blocking`.
+// Fields:
+// - `db`: SQLite connection behind Arc<Mutex<...>>. Rusqlite is sync, so
+//   handlers take the lock inside `spawn_blocking`.
+// - `oauth_client`: pre-built oauth2 client; handlers use it to mint auth URLs
+//   and exchange codes.
+// - `pending_auths`: in-flight OAuth attempts keyed by the `state` parameter.
+//   We stash the PKCE verifier here between `/oauth/start` and `/oauth/callback`
+//   so the callback can complete the exchange. For a single-user local app an
+//   in-memory map is plenty; stale entries are evicted after 10 minutes.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
+use oauth2::basic::BasicClient;
+use oauth2::PkceCodeVerifier;
 use rusqlite::Connection;
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: Arc<Mutex<Connection>>,
+    pub oauth_client: Arc<BasicClient>,
+    pub pending_auths: Arc<Mutex<HashMap<String, PendingAuth>>>,
+}
+
+pub struct PendingAuth {
+    pub pkce_verifier: PkceCodeVerifier,
+    pub created_at: Instant,
 }

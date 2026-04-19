@@ -1,8 +1,11 @@
 // omnidrive — entry point.
 //
-// M3: wire up SQLite. Open the database at startup, run migrations, stash the
-// connection in AppState so handlers can query it. OAuth lands in M4.
+// M4: wire up OAuth. Build the `oauth2` client from .env credentials at
+// startup, add a pending-auths map to AppState, register /oauth/start and
+// /oauth/callback routes. Tokens are logged to the terminal for now;
+// persistence arrives in M5.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
@@ -13,6 +16,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 mod db;
 mod error;
 mod models;
+mod oauth;
 mod routes;
 mod state;
 
@@ -20,6 +24,7 @@ use state::AppState;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Load .env if present — OAuth client_id/secret come from here.
     let _ = dotenvy::dotenv();
 
     tracing_subscriber::registry()
@@ -37,8 +42,13 @@ async fn main() -> Result<()> {
     // Open SQLite (creates on first run).
     let conn = db::init()?;
 
+    // Build the OAuth client from env. Fails fast if the required vars are missing.
+    let oauth_client = oauth::build_client()?;
+
     let state = AppState {
         db: Arc::new(Mutex::new(conn)),
+        oauth_client: Arc::new(oauth_client),
+        pending_auths: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let app = routes::router()
