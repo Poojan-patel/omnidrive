@@ -34,6 +34,50 @@
       font-weight: 500;
     }
     .btn:hover { background: #1558b8; }
+
+    .accounts {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    .account {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 0.75rem 1rem;
+      border: 1px solid rgba(128, 128, 128, 0.25);
+      border-radius: 8px;
+      margin-bottom: 0.5rem;
+    }
+    .avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      object-fit: cover;
+    }
+    .avatar-placeholder {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: #1a73e8;
+      color: white;
+      font-weight: 600;
+    }
+    .account-meta { display: flex; flex-direction: column; min-width: 0; }
+    .account-meta .name {
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .account-meta .email {
+      color: #888;
+      font-size: 0.9em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
   </style>
 </head>
 <body>

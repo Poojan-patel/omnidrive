@@ -1,7 +1,7 @@
 // Accounts table queries. Sync functions — callers wrap these in
 // `tokio::task::spawn_blocking` so the async runtime isn't blocked on SQLite.
 
-use rusqlite::{Connection, Result};
+use rusqlite::{params, Connection, Result};
 
 use crate::models::{Account, AccountStatus};
 
@@ -27,4 +27,32 @@ pub fn list(conn: &Connection) -> Result<Vec<Account>> {
     })?;
 
     rows.collect()
+}
+
+/// Insert a new account or update the metadata of an existing one (matched by
+/// `sub`). Crucially, `added_at` is *not* overwritten on conflict — we want
+/// to preserve the original "first connected" timestamp even if the user
+/// reconnects later (e.g., after a refresh-token expiry).
+pub fn upsert(conn: &Connection, account: &Account) -> Result<()> {
+    conn.execute(
+        "INSERT INTO accounts
+            (sub, email, name, picture_url, added_at, last_refreshed_at, status)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT(sub) DO UPDATE SET
+             email             = excluded.email,
+             name              = excluded.name,
+             picture_url       = excluded.picture_url,
+             last_refreshed_at = excluded.last_refreshed_at,
+             status            = excluded.status",
+        params![
+            account.sub,
+            account.email,
+            account.name,
+            account.picture_url,
+            account.added_at,
+            account.last_refreshed_at,
+            account.status.as_str(),
+        ],
+    )?;
+    Ok(())
 }

@@ -13,6 +13,18 @@ pub struct Account {
     pub status: AccountStatus,
 }
 
+impl Account {
+    /// First character of the email, uppercased — used for the avatar
+    /// placeholder when the account has no profile picture.
+    pub fn initial(&self) -> String {
+        self.email
+            .chars()
+            .next()
+            .map(|c| c.to_ascii_uppercase().to_string())
+            .unwrap_or_else(|| "?".to_string())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AccountStatus {
     Active,

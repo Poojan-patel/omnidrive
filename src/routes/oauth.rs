@@ -1,21 +1,21 @@
 // OAuth handlers.
 //
 // /oauth/start     — mints an auth URL, stashes PKCE state, redirects to Google.
-// /oauth/callback  — validates state, exchanges the code, logs the tokens.
-//
-// M4 intentionally stops at "tokens in the log" — no DB writes, no keyring.
-// M5 picks up the persistence side.
+// /oauth/callback  — validates state, exchanges the code, persists the account
+//                    (DB row + keyring refresh token), redirects home.
 
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Query, State};
-use axum::response::{Html, Redirect};
+use axum::response::{Html, IntoResponse, Redirect, Response};
 use oauth2::reqwest::async_http_client;
 use oauth2::{AuthorizationCode, CsrfToken, PkceCodeChallenge, Scope, TokenResponse};
 use serde::Deserialize;
 
+use crate::db;
 use crate::error::AppError;
-use crate::oauth::SCOPES;
+use crate::models::{Account, AccountStatus};
+use crate::oauth::{fetch_userinfo, KEYRING_SERVICE, SCOPES};
 use crate::state::{AppState, PendingAuth};
 
 /// GET /oauth/start
@@ -80,12 +80,15 @@ pub struct CallbackParams {
 }
 
 /// GET /oauth/callback?code=...&state=...
+///
+/// Happy path: validate state → exchange code → fetch userinfo → save refresh
+/// token to OS keyring → upsert account row in SQLite → redirect to /.
 pub async fn callback(
     State(state): State<AppState>,
     Query(params): Query<CallbackParams>,
-) -> Result<Html<String>, AppError> {
+) -> Result<Response, AppError> {
     // User clicked "Cancel" on the consent screen (or some other upstream
-    // failure).
+    // failure). Render a friendly page rather than 500ing.
     if let Some(err) = params.error {
         tracing::warn!("OAuth denied by user or error from Google: {err}");
         return Ok(Html(format!(
@@ -93,7 +96,8 @@ pub async fn callback(
              <h1>OAuth canceled</h1>\
              <p>Reason: <code>{err}</code></p>\
              <p><a href=\"/\">Back home</a></p>"
-        )));
+        ))
+        .into_response());
     }
 
     let code = params
@@ -128,30 +132,69 @@ pub async fn callback(
         .await
         .map_err(|e| anyhow::anyhow!("token exchange failed: {e:?}"))?;
 
-    let access_token = token.access_token().secret();
+    let access_token = token.access_token().secret().to_string();
+
+    // The refresh_token is what M7 will use to mint new access_tokens. If
+    // Google didn't send one, the user previously consented and Google is
+    // assuming we still have an old one — which we don't, since this is a
+    // fresh install. `prompt=consent` in /oauth/start should prevent this,
+    // but bail loudly if it ever happens so we don't silently lose access.
     let refresh_token = token
         .refresh_token()
-        .map(|t| t.secret().as_str())
-        .unwrap_or("<none>");
-    let expires_in = token
-        .expires_in()
-        .map(|d| d.as_secs().to_string())
-        .unwrap_or_else(|| "<unknown>".to_string());
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Google didn't return a refresh_token. \
+                 If you've connected this account before, revoke omnidrive at \
+                 https://myaccount.google.com/permissions and try again."
+            )
+        })?
+        .secret()
+        .to_string();
 
-    // tracing::info!(
-    //     access_token = %access_token,
-    //     refresh_token = %refresh_token,
-    //     expires_in_secs = %expires_in,
-    //     "OAuth token exchange succeeded"
-    // );
+    // Fetch identity from Google's userinfo endpoint. We need `sub` (Google's
+    // stable user ID) before we can persist anything.
+    let userinfo = fetch_userinfo(&access_token).await?;
 
-    Ok(Html(
-        "<!doctype html><meta charset=\"utf-8\">\
-         <h1>OAuth success!</h1>\
-         <p>Tokens were logged to the server terminal. \
-         Persistence lands in the next milestone — \
-         for now, this is just a plumbing check.</p>\
-         <p><a href=\"/\">Back home</a></p>"
-            .to_string(),
-    ))
+    tracing::info!(
+        sub = %userinfo.sub,
+        email = %userinfo.email,
+        "OAuth completed; persisting account"
+    );
+
+    // Stash the refresh_token in the OS keyring keyed by `sub`. macOS
+    // Keychain / Windows Credential Manager / Linux Secret Service.
+    let entry = keyring::Entry::new(KEYRING_SERVICE, &userinfo.sub)
+        .map_err(|e| anyhow::anyhow!("opening keyring entry: {e}"))?;
+    entry
+        .set_password(&refresh_token)
+        .map_err(|e| anyhow::anyhow!("writing refresh token to keyring: {e}"))?;
+
+    // Build the Account row and upsert into SQLite.
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)?
+        .as_secs() as i64;
+    let account = Account {
+        sub: userinfo.sub,
+        email: userinfo.email,
+        name: userinfo.name,
+        picture_url: userinfo.picture,
+        added_at: now,
+        last_refreshed_at: Some(now),
+        status: AccountStatus::Active,
+    };
+
+    // rusqlite is sync — run the insert on the blocking pool.
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let conn = db
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        db::accounts::upsert(&conn, &account)?;
+        Ok(())
+    })
+    .await??;
+
+    // Land back on the home page so the user sees their freshly-connected
+    // account in the list.
+    Ok(Redirect::to("/").into_response())
 }
