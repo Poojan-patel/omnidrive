@@ -1,10 +1,14 @@
 // Route registration. Each sub-module owns its own handler(s) and we aggregate
 // them into a single Router here.
 
-use axum::{routing::get, Router};
+use axum::{
+    routing::{delete, get},
+    Router,
+};
 
 use crate::state::AppState;
 
+mod accounts;
 mod home;
 mod oauth;
 
@@ -13,4 +17,5 @@ pub fn router() -> Router<AppState> {
         .route("/", get(home::index))
         .route("/oauth/start", get(oauth::start))
         .route("/oauth/callback", get(oauth::callback))
+        .route("/accounts/:sub", delete(accounts::delete))
 }

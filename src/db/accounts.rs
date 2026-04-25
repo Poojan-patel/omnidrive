@@ -29,6 +29,13 @@ pub fn list(conn: &Connection) -> Result<Vec<Account>> {
     rows.collect()
 }
 
+/// Remove an account row by `sub`. Returns whether a row actually existed.
+/// Caller is responsible for cleaning up the matching keyring entry.
+pub fn delete(conn: &Connection, sub: &str) -> Result<bool> {
+    let rows = conn.execute("DELETE FROM accounts WHERE sub = ?1", params![sub])?;
+    Ok(rows > 0)
+}
+
 /// Insert a new account or update the metadata of an existing one (matched by
 /// `sub`). Crucially, `added_at` is *not* overwritten on conflict — we want
 /// to preserve the original "first connected" timestamp even if the user

@@ -1,36 +1,59 @@
 {% extends "base.html" %}
 
-{% block title %}omnidrive — connected accounts{% endblock %}
+{% block title %}omnidrive{% endblock %}
 
 {% block content %}
-  <section>
-    <h2>Connected accounts</h2>
-    {% if accounts.is_empty() %}
-      <div class="empty">
-        <p>No accounts connected yet.</p>
-        <a class="btn" href="/oauth/start">Add Google account</a>
+<aside class="sidebar">
+  <div class="sidebar-section-label">Accounts</div>
+  {% include "_accounts_list.html" %}
+  <div class="sidebar-footer">
+    <a class="btn btn-primary" href="/oauth/start">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path d="M12 5v14M5 12h14" stroke-linecap="round"/>
+      </svg>
+      Add account
+    </a>
+  </div>
+</aside>
+
+<main class="main">
+  <div class="main-inner">
+    <form class="searchbar" action="/search" method="get" role="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <circle cx="11" cy="11" r="7" stroke-linecap="round"/>
+        <path d="m21 21-4.35-4.35" stroke-linecap="round"/>
+      </svg>
+      <input
+        type="text"
+        name="q"
+        placeholder="Search across all your drives"
+        aria-label="Search across all your drives"
+        autocomplete="off">
+    </form>
+
+    <h2 class="section-title">Files</h2>
+
+    <div class="empty-state">
+      <div class="empty-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
+        </svg>
       </div>
-    {% else %}
-      <ul class="accounts">
-        {% for account in accounts %}
-          <li class="account">
-            {% match account.picture_url %}
-              {% when Some with (url) %}
-                <img class="avatar" src="{{ url }}" alt="" referrerpolicy="no-referrer">
-              {% when None %}
-                <div class="avatar avatar-placeholder">{{ account.initial() }}</div>
-            {% endmatch %}
-            <div class="account-meta">
-              {% match account.name %}
-                {% when Some with (n) %}<div class="name">{{ n }}</div>{% when None %}{% endmatch %}
-              <div class="email">{{ account.email }}</div>
-            </div>
-          </li>
-        {% endfor %}
-      </ul>
-      <p style="margin-top: 1.5rem;">
-        <a class="btn" href="/oauth/start">Add another account</a>
-      </p>
-    {% endif %}
-  </section>
+      {% if accounts.is_empty() %}
+        <div class="empty-headline">Connect a Google account to get started</div>
+        <div class="empty-detail">
+          Files from your Drives will show up here once you've connected one.
+          Use <strong>Add account</strong> in the left panel.
+        </div>
+      {% else %}
+        <div class="empty-headline">Search to see your files</div>
+        <div class="empty-detail">
+          Type a query in the search bar above. Live Drive search lands in M7
+          — for now this area's a placeholder.
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</main>
 {% endblock %}

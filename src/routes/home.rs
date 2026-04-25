@@ -1,6 +1,7 @@
 // GET / — the home page. Queries the connected-accounts list from SQLite and
-// hands it to the template. In M3 the list will always be empty (no way to add
-// accounts until M4/M5), but the full data flow is real.
+// hands it to the template, which renders the Drive-style sidebar + main pane
+// shell. The same `accounts` field is forwarded into the _accounts_list.html
+// partial via `{% include %}`.
 
 use askama::Template;
 use axum::extract::State;
