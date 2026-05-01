@@ -36,6 +36,24 @@ pub fn delete(conn: &Connection, sub: &str) -> Result<bool> {
     Ok(rows > 0)
 }
 
+/// Update an account's status (e.g., flip to NeedsReauth when refresh fails).
+/// Also bumps last_refreshed_at to the current epoch second when the status
+/// becomes Active again, so the UI can show a fresh timestamp.
+pub fn set_status(conn: &Connection, sub: &str, status: AccountStatus) -> Result<()> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    conn.execute(
+        "UPDATE accounts
+            SET status = ?1,
+                last_refreshed_at = CASE WHEN ?1 = 'active' THEN ?2 ELSE last_refreshed_at END
+          WHERE sub = ?3",
+        params![status.as_str(), now, sub],
+    )?;
+    Ok(())
+}
+
 /// Insert a new account or update the metadata of an existing one (matched by
 /// `sub`). Crucially, `added_at` is *not* overwritten on conflict — we want
 /// to preserve the original "first connected" timestamp even if the user

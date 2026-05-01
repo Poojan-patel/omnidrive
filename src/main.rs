@@ -1,9 +1,8 @@
 // omnidrive — entry point.
 //
-// M4: wire up OAuth. Build the `oauth2` client from .env credentials at
-// startup, add a pending-auths map to AppState, register /oauth/start and
-// /oauth/callback routes. Tokens are logged to the terminal for now;
-// persistence arrives in M5.
+// Boots the Axum server. Initializes the SQLite connection, the OAuth client,
+// the in-flight-auth map, and the access-token cache, then hands them all to
+// AppState and wires up the router.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -14,6 +13,7 @@ use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 mod db;
+mod drive;
 mod error;
 mod models;
 mod oauth;
@@ -49,6 +49,7 @@ async fn main() -> Result<()> {
         db: Arc::new(Mutex::new(conn)),
         oauth_client: Arc::new(oauth_client),
         pending_auths: Arc::new(Mutex::new(HashMap::new())),
+        token_cache: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let app = routes::router()

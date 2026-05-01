@@ -1,6 +1,9 @@
 {% extends "base.html" %}
 
-{% block title %}omnidrive{% endblock %}
+{% block title %}
+  {% match query %}
+    {% when Some with (q) %}Search: {{ q }} — omnidrive{% when None %}omnidrive{% endmatch %}
+{% endblock %}
 
 {% block content %}
 <aside class="sidebar">
@@ -28,32 +31,58 @@
         name="q"
         placeholder="Search across all your drives"
         aria-label="Search across all your drives"
-        autocomplete="off">
+        autocomplete="off"
+        value="{% match query %}{% when Some with (q) %}{{ q }}{% when None %}{% endmatch %}">
     </form>
 
-    <h2 class="section-title">Files</h2>
-
-    <div class="empty-state">
-      <div class="empty-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
-             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
-        </svg>
+    {% if !failed_accounts.is_empty() %}
+      <div class="banner banner-warning">
+        Couldn't load files from
+        {% for email in failed_accounts %}
+          <strong>{{ email }}</strong>{% if !loop.last %}, {% endif %}
+        {% endfor %}.
+        These accounts may need to be reconnected — click <strong>Add account</strong> with the same Google account to refresh access.
       </div>
-      {% if accounts.is_empty() %}
-        <div class="empty-headline">Connect a Google account to get started</div>
-        <div class="empty-detail">
-          Files from your Drives will show up here once you've connected one.
-          Use <strong>Add account</strong> in the left panel.
+    {% endif %}
+
+    <h2 class="section-title">
+      {% match query %}
+        {% when Some with (q) %}Results for &ldquo;{{ q }}&rdquo;{% when None %}Recent files{% endmatch %}
+    </h2>
+
+    {% if files.is_empty() %}
+      <div class="empty-state">
+        <div class="empty-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
+          </svg>
         </div>
-      {% else %}
-        <div class="empty-headline">Search to see your files</div>
-        <div class="empty-detail">
-          Type a query in the search bar above. Live Drive search lands in M7
-          — for now this area's a placeholder.
-        </div>
-      {% endif %}
-    </div>
+        {% if accounts.is_empty() %}
+          <div class="empty-headline">Connect a Google account to get started</div>
+          <div class="empty-detail">
+            Files from your Drives will show up here once you've connected one.
+            Use <strong>Add account</strong> in the left panel.
+          </div>
+        {% else %}
+          {% match query %}
+            {% when Some with (q) %}
+              <div class="empty-headline">No matches for &ldquo;{{ q }}&rdquo;</div>
+              <div class="empty-detail">
+                We searched the names of files across your connected Drives but
+                didn't find anything. Try a different keyword.
+              </div>
+            {% when None %}
+              <div class="empty-headline">No files at the root of your drives</div>
+              <div class="empty-detail">
+                Use the search bar above to look across all your Drives.
+              </div>
+          {% endmatch %}
+        {% endif %}
+      </div>
+    {% else %}
+      {% include "_file_list.html" %}
+    {% endif %}
   </div>
 </main>
 {% endblock %}

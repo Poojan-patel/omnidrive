@@ -1,0 +1,48 @@
+{# File list partial. Expects `files: Vec<FileWithSource>` in scope. #}
+<table class="file-list">
+  <thead>
+    <tr>
+      <th class="col-type">Type</th>
+      <th class="col-name">Name</th>
+      <th class="col-location">Location</th>
+      <th class="col-modified">Last modified</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for fws in files %}
+      <tr>
+        <td class="col-type">
+          {% if fws.file.is_folder() %}
+            <span class="type-badge type-folder">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z"/>
+              </svg>
+              Folder
+            </span>
+          {% else %}
+            <span class="type-badge type-file">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+              </svg>
+              File
+            </span>
+          {% endif %}
+        </td>
+        <td class="col-name">
+          {% match fws.file.web_view_link %}
+            {% when Some with (link) %}
+              <a class="file-name-link" href="{{ link }}" target="_blank" rel="noopener">{{ fws.file.name }}</a>
+            {% when None %}
+              <span class="file-name-link">{{ fws.file.name }}</span>
+          {% endmatch %}
+        </td>
+        <td class="col-location">
+          <span class="location-chip" title="{{ fws.account_email }}">{{ fws.account_email }}</span>
+        </td>
+        <td class="col-modified" title="{{ fws.file.modified_time_iso() }}">{{ fws.file.modified_time_label() }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>

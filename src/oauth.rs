@@ -9,10 +9,17 @@
 // Google's userinfo endpoint to learn *which* account just connected (sub,
 // email, name, picture) before we persist anything.
 
+use std::time::{Duration, Instant};
+
 use anyhow::{Context, Result};
 use oauth2::basic::BasicClient;
-use oauth2::{AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl};
+use oauth2::reqwest::async_http_client;
+use oauth2::{AuthUrl, ClientId, ClientSecret, RedirectUrl, RefreshToken, TokenResponse, TokenUrl};
 use serde::Deserialize;
+
+use crate::db;
+use crate::models::AccountStatus;
+use crate::state::{AppState, CachedToken};
 
 /// Google's OAuth 2.0 endpoints (v2 auth, v4 token).
 const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -92,4 +99,105 @@ pub async fn fetch_userinfo(access_token: &str) -> Result<UserInfo> {
     resp.json::<UserInfo>()
         .await
         .context("decoding userinfo response")
+}
+
+/// Refresh-with-cache primitive. Returns a valid access_token for `sub`,
+/// refreshing through Google's token endpoint if the cached one is expired
+/// (or about to expire — we use a 60s safety margin so a request that takes
+/// ~30s doesn't strand on a token that expires mid-flight).
+///
+/// On `invalid_grant` from Google (refresh_token revoked or 7-day-expired in
+/// Test mode), the account is marked NeedsReauth in the DB and the keyring
+/// entry is left in place for inspection. The user reconnects via the
+/// normal /oauth/start flow; that upserts the row + new refresh_token and
+/// flips status back to Active.
+pub async fn get_access_token(state: &AppState, sub: &str) -> Result<String> {
+    // Fast path: cache hit with comfy expiry margin.
+    {
+        let cache = state
+            .token_cache
+            .lock()
+            .map_err(|_| anyhow::anyhow!("token_cache mutex poisoned"))?;
+        if let Some(cached) = cache.get(sub) {
+            if cached.expires_at > Instant::now() + Duration::from_secs(60) {
+                return Ok(cached.access_token.clone());
+            }
+        }
+    } // drop the lock — we don't want to hold it across HTTP calls.
+
+    // Read the refresh_token from the OS keyring. Sync — spawn_blocking.
+    let sub_for_keyring = sub.to_string();
+    let refresh_token = tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
+        let entry = keyring::Entry::new(KEYRING_SERVICE, &sub_for_keyring)
+            .map_err(|e| anyhow::anyhow!("opening keyring entry: {e}"))?;
+        entry
+            .get_password()
+            .map_err(|e| anyhow::anyhow!("reading refresh token from keyring: {e}"))
+    })
+    .await??;
+
+    // Hit Google's token endpoint with the refresh_token.
+    let exchange_result = state
+        .oauth_client
+        .exchange_refresh_token(&RefreshToken::new(refresh_token))
+        .request_async(async_http_client)
+        .await;
+
+    let token = match exchange_result {
+        Ok(t) => t,
+        Err(e) => {
+            // The oauth2 crate's error type doesn't expose `error` cleanly
+            // without pattern-matching on its enum, so we fall back to the
+            // rendered debug string. `invalid_grant` is the canonical signal
+            // that the refresh token is dead.
+            let err_str = format!("{e:?}");
+            if err_str.contains("invalid_grant") {
+                tracing::warn!(sub = %sub, "refresh token rejected — marking NeedsReauth");
+                let db_arc = state.db.clone();
+                let sub_for_db = sub.to_string();
+                let _ = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+                    let conn = db_arc
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+                    db::accounts::set_status(&conn, &sub_for_db, AccountStatus::NeedsReauth)?;
+                    Ok(())
+                })
+                .await;
+            }
+            return Err(anyhow::anyhow!("token refresh failed: {err_str}"));
+        }
+    };
+
+    let access_token = token.access_token().secret().to_string();
+    let expires_in = token.expires_in().unwrap_or(Duration::from_secs(3600));
+
+    // Update cache.
+    {
+        let mut cache = state
+            .token_cache
+            .lock()
+            .map_err(|_| anyhow::anyhow!("token_cache mutex poisoned"))?;
+        cache.insert(
+            sub.to_string(),
+            CachedToken {
+                access_token: access_token.clone(),
+                expires_at: Instant::now() + expires_in,
+            },
+        );
+    }
+
+    // Touch the DB so last_refreshed_at advances and (if the row was
+    // NeedsReauth from a prior failure) flip it back to Active.
+    let db_arc = state.db.clone();
+    let sub_for_db = sub.to_string();
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let conn = db_arc
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        db::accounts::set_status(&conn, &sub_for_db, AccountStatus::Active)?;
+        Ok(())
+    })
+    .await??;
+
+    Ok(access_token)
 }
