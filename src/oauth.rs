@@ -29,9 +29,6 @@ const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 /// for the account whose access_token is presented as a Bearer credential.
 const GOOGLE_USERINFO_URL: &str = "https://openidconnect.googleapis.com/v1/userinfo";
 
-/// Service name used for OS keyring entries. Refresh tokens are stored as
-/// (service=KEYRING_SERVICE, username=sub, password=refresh_token).
-pub const KEYRING_SERVICE: &str = "omnidrive";
 
 /// Scopes we'll request on consent.
 ///
@@ -106,11 +103,14 @@ pub async fn fetch_userinfo(access_token: &str) -> Result<UserInfo> {
 /// (or about to expire — we use a 60s safety margin so a request that takes
 /// ~30s doesn't strand on a token that expires mid-flight).
 ///
+/// The stored refresh_token lives in SQLite as an AES-256-GCM ciphertext
+/// (see crypto::MasterKey). We pull the blob, decrypt with the in-memory
+/// master key, and hand the plaintext to Google's token endpoint.
+///
 /// On `invalid_grant` from Google (refresh_token revoked or 7-day-expired in
-/// Test mode), the account is marked NeedsReauth in the DB and the keyring
-/// entry is left in place for inspection. The user reconnects via the
-/// normal /oauth/start flow; that upserts the row + new refresh_token and
-/// flips status back to Active.
+/// Test mode), the account is marked NeedsReauth in the DB. The user
+/// reconnects via the normal /oauth/start flow; that upserts the row with
+/// a new encrypted refresh_token and flips status back to Active.
 pub async fn get_access_token(state: &AppState, sub: &str) -> Result<String> {
     // Fast path: cache hit with comfy expiry margin.
     {
@@ -125,14 +125,21 @@ pub async fn get_access_token(state: &AppState, sub: &str) -> Result<String> {
         }
     } // drop the lock — we don't want to hold it across HTTP calls.
 
-    // Read the refresh_token from the OS keyring. Sync — spawn_blocking.
-    let sub_for_keyring = sub.to_string();
+    // Read + decrypt the refresh_token from SQLite. Sync — spawn_blocking.
+    let db_for_read = state.db.clone();
+    let mk = state.master_key.clone();
+    let sub_for_db = sub.to_string();
     let refresh_token = tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
-        let entry = keyring::Entry::new(KEYRING_SERVICE, &sub_for_keyring)
-            .map_err(|e| anyhow::anyhow!("opening keyring entry: {e}"))?;
-        entry
-            .get_password()
-            .map_err(|e| anyhow::anyhow!("reading refresh token from keyring: {e}"))
+        let conn = db_for_read
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let blob = db::accounts::get_refresh_token(&conn, &sub_for_db)?
+            .ok_or_else(|| anyhow::anyhow!(
+                "no refresh_token stored for this account — \
+                 reconnect via Add account"
+            ))?;
+        let plaintext = mk.decrypt(&blob)?;
+        String::from_utf8(plaintext).map_err(|e| anyhow::anyhow!("refresh_token not utf-8: {e}"))
     })
     .await??;
 

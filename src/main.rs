@@ -12,6 +12,7 @@ use anyhow::Result;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
+mod crypto;
 mod db;
 mod drive;
 mod error;
@@ -45,11 +46,18 @@ async fn main() -> Result<()> {
     // Build the OAuth client from env. Fails fast if the required vars are missing.
     let oauth_client = oauth::build_client()?;
 
+    // Load (or generate, on first run) the master key used to encrypt
+    // refresh tokens stored in SQLite. Lives next to the .db file with
+    // mode 0600 on Unix.
+    let master_key_path = crypto::master_key_path()?;
+    let master_key = crypto::MasterKey::load_or_generate(&master_key_path)?;
+
     let state = AppState {
         db: Arc::new(Mutex::new(conn)),
         oauth_client: Arc::new(oauth_client),
         pending_auths: Arc::new(Mutex::new(HashMap::new())),
         token_cache: Arc::new(Mutex::new(HashMap::new())),
+        master_key: Arc::new(master_key),
     };
 
     let app = routes::router()

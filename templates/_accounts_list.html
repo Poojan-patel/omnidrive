@@ -35,7 +35,7 @@
                 hx-delete="/accounts/{{ account.sub }}"
                 hx-target="#sidebar-accounts"
                 hx-swap="outerHTML"
-                hx-confirm="Remove {{ account.email }} from omnidrive?&#10;&#10;This deletes the local copy (DB row + keyring entry). To fully revoke access at Google, also remove omnidrive at https://myaccount.google.com/permissions">
+                hx-confirm="Remove {{ account.email }} from omnidrive?&#10;&#10;This deletes the local row and the encrypted refresh token. To fully revoke access at Google, also remove omnidrive at https://myaccount.google.com/permissions">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
                stroke-width="2" stroke-linecap="round" aria-hidden="true">
             <path d="M6 6 18 18 M6 18 18 6"/>

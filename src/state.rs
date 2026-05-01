@@ -22,12 +22,17 @@ use oauth2::basic::BasicClient;
 use oauth2::PkceCodeVerifier;
 use rusqlite::Connection;
 
+use crate::crypto::MasterKey;
+
 #[derive(Clone)]
 pub struct AppState {
     pub db: Arc<Mutex<Connection>>,
     pub oauth_client: Arc<BasicClient>,
     pub pending_auths: Arc<Mutex<HashMap<String, PendingAuth>>>,
     pub token_cache: Arc<Mutex<HashMap<String, CachedToken>>>,
+    /// Master key for at-rest encryption of refresh tokens stored in SQLite.
+    /// Loaded once at startup from the master.key sibling file.
+    pub master_key: Arc<MasterKey>,
 }
 
 pub struct PendingAuth {

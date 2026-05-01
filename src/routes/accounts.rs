@@ -2,11 +2,11 @@
 //
 // /accounts/:sub  DELETE — remove a connected account from omnidrive.
 //
-// "Remove" here means: drop the SQLite row and best-effort delete the OS
-// keyring entry. We *don't* call Google's revocation endpoint — the user has
-// to do that themselves at https://myaccount.google.com/permissions if they
-// want to fully cut omnidrive's access. The HTMX confirm dialog calls this
-// out.
+// "Remove" here means: drop the SQLite row, which takes the encrypted
+// refresh_token blob with it. We *don't* call Google's revocation endpoint
+// — the user has to do that themselves at
+// https://myaccount.google.com/permissions if they want to fully cut
+// omnidrive's access. The HTMX confirm dialog calls this out.
 //
 // Response body is the rendered sidebar partial (just the <ul>), which HTMX
 // swaps into #sidebar-accounts on the page. No full re-render needed.
@@ -17,7 +17,6 @@ use axum::extract::{Path, State};
 use crate::db;
 use crate::error::AppError;
 use crate::models::Account;
-use crate::oauth::KEYRING_SERVICE;
 use crate::state::AppState;
 
 /// Just the sidebar account list. Same data shape as IndexTemplate so
@@ -31,40 +30,14 @@ pub struct AccountsListTemplate {
 
 /// DELETE /accounts/:sub
 ///
-/// Pulls the keyring entry first (best-effort), then the DB row, then
-/// re-lists and returns the partial.
+/// Deletes the row (which takes the encrypted refresh_token with it),
+/// evicts the cached access_token, and re-lists for the HTMX swap.
+/// Idempotent — deleting an already-removed account just renders an
+/// unchanged list.
 pub async fn delete(
     State(state): State<AppState>,
     Path(sub): Path<String>,
 ) -> Result<AccountsListTemplate, AppError> {
-    // Best-effort keyring delete on the blocking pool. If the entry's already
-    // missing (user cleared it manually, or this is a duplicate request), we
-    // log and keep going — the DB row deletion is the source of truth.
-    let sub_for_keyring = sub.clone();
-    tokio::task::spawn_blocking(move || {
-        match keyring::Entry::new(KEYRING_SERVICE, &sub_for_keyring) {
-            Ok(entry) => {
-                if let Err(e) = entry.delete_password() {
-                    tracing::warn!(
-                        sub = %sub_for_keyring,
-                        error = ?e,
-                        "keyring delete failed; continuing with DB delete"
-                    );
-                }
-            }
-            Err(e) => {
-                tracing::warn!(
-                    sub = %sub_for_keyring,
-                    error = ?e,
-                    "couldn't open keyring entry for delete"
-                );
-            }
-        }
-    })
-    .await?;
-
-    // DB delete + re-list inside one critical section so we don't race a
-    // concurrent OAuth callback.
     let db_arc = state.db.clone();
     let sub_for_db = sub.clone();
     let accounts = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<Account>> {
@@ -78,6 +51,19 @@ pub async fn delete(
         Ok(db::accounts::list(&conn)?)
     })
     .await??;
+
+    // Evict the cached access_token for this account. Without this, a
+    // re-add of the same Google account would inherit the stale cached
+    // token until natural expiry — see also the matching cache-update in
+    // routes::oauth::callback for the symmetric "reconnect after revoke"
+    // case.
+    {
+        let mut cache = state
+            .token_cache
+            .lock()
+            .map_err(|_| anyhow::anyhow!("token_cache mutex poisoned"))?;
+        cache.remove(&sub);
+    }
 
     tracing::info!(sub = %sub, "account removed");
 

@@ -8,6 +8,7 @@ Cargo.lock.bak
 .env.local
 credentials.json
 client_secret*.json
+master.key
 
 # SQLite data
 *.db

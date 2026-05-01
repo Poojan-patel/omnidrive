@@ -14,7 +14,7 @@ Many people maintain several Gmail accounts, partly for the free 15GB of Drive s
 
 - You bring your own Google Cloud project and OAuth credentials (see Setup below).
 - omnidrive runs entirely on your machine — no third-party server, no cloud component.
-- Refresh tokens are stored in your OS keyring (macOS Keychain / Windows Credential Manager / Linux Secret Service). Account metadata lives in a local SQLite file.
+- Refresh tokens are stored encrypted (AES-256-GCM, per-row random nonce) inside the local SQLite file. The encryption key lives in a sibling `master.key` file, mode `0600`.
 - Searches fan out to each connected account's Drive API in parallel and merge the results.
 
 ## Setup
@@ -49,7 +49,7 @@ Then open <http://127.0.0.1:8765>.
 
 - **Backend:** Rust + [Axum](https://github.com/tokio-rs/axum) + [tokio](https://tokio.rs)
 - **UI:** server-rendered [Askama](https://github.com/djc/askama) templates with [HTMX](https://htmx.org) for interactivity (no JS build step)
-- **Storage:** [rusqlite](https://github.com/rusqlite/rusqlite) (bundled SQLite) for account metadata, OS keyring for refresh tokens
+- **Storage:** [rusqlite](https://github.com/rusqlite/rusqlite) (bundled SQLite) for account metadata + encrypted refresh tokens, with a sibling `master.key` file holding the AES-256-GCM key
 - **OAuth:** [`oauth2`](https://github.com/ramosbugs/oauth2-rs) crate
 
 ## License

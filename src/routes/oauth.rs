@@ -2,7 +2,7 @@
 //
 // /oauth/start     — mints an auth URL, stashes PKCE state, redirects to Google.
 // /oauth/callback  — validates state, exchanges the code, persists the account
-//                    (DB row + keyring refresh token), redirects home.
+//                    (DB row + encrypted refresh_token blob), redirects home.
 
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -15,8 +15,8 @@ use serde::Deserialize;
 use crate::db;
 use crate::error::AppError;
 use crate::models::{Account, AccountStatus};
-use crate::oauth::{fetch_userinfo, KEYRING_SERVICE, SCOPES};
-use crate::state::{AppState, PendingAuth};
+use crate::oauth::{fetch_userinfo, SCOPES};
+use crate::state::{AppState, CachedToken, PendingAuth};
 
 /// GET /oauth/start
 ///
@@ -81,8 +81,9 @@ pub struct CallbackParams {
 
 /// GET /oauth/callback?code=...&state=...
 ///
-/// Happy path: validate state → exchange code → fetch userinfo → save refresh
-/// token to OS keyring → upsert account row in SQLite → redirect to /.
+/// Happy path: validate state → exchange code → fetch userinfo → encrypt
+/// refresh_token → upsert account row (with encrypted blob) in SQLite →
+/// redirect to /.
 pub async fn callback(
     State(state): State<AppState>,
     Query(params): Query<CallbackParams>,
@@ -133,12 +134,16 @@ pub async fn callback(
         .map_err(|e| anyhow::anyhow!("token exchange failed: {e:?}"))?;
 
     let access_token = token.access_token().secret().to_string();
+    let access_token_expires_in = token
+        .expires_in()
+        .unwrap_or(Duration::from_secs(3600));
 
-    // The refresh_token is what M7 will use to mint new access_tokens. If
-    // Google didn't send one, the user previously consented and Google is
-    // assuming we still have an old one — which we don't, since this is a
-    // fresh install. `prompt=consent` in /oauth/start should prevent this,
-    // but bail loudly if it ever happens so we don't silently lose access.
+    // The refresh_token is what we'll use later to mint new access_tokens.
+    // If Google didn't send one, the user previously consented and Google
+    // is assuming we still have an old one — which we don't, since this is
+    // a fresh install. `prompt=consent` in /oauth/start should prevent
+    // this, but bail loudly if it ever happens so we don't silently lose
+    // access.
     let refresh_token = token
         .refresh_token()
         .ok_or_else(|| {
@@ -161,15 +166,12 @@ pub async fn callback(
         "OAuth completed; persisting account"
     );
 
-    // Stash the refresh_token in the OS keyring keyed by `sub`. macOS
-    // Keychain / Windows Credential Manager / Linux Secret Service.
-    let entry = keyring::Entry::new(KEYRING_SERVICE, &userinfo.sub)
-        .map_err(|e| anyhow::anyhow!("opening keyring entry: {e}"))?;
-    entry
-        .set_password(&refresh_token)
-        .map_err(|e| anyhow::anyhow!("writing refresh token to keyring: {e}"))?;
+    // Encrypt the refresh_token with the master key before it ever touches
+    // the disk. The blob layout (nonce || ciphertext+tag) is in crypto.rs.
+    let encrypted_refresh_token = state.master_key.encrypt(refresh_token.as_bytes())?;
 
-    // Build the Account row and upsert into SQLite.
+    // Build the Account row and upsert into SQLite alongside the encrypted
+    // refresh_token blob.
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)?
         .as_secs() as i64;
@@ -183,16 +185,44 @@ pub async fn callback(
         status: AccountStatus::Active,
     };
 
+    // Clone `sub` for the cache update below, since the closure below
+    // takes ownership of `account`.
+    let sub_for_cache = account.sub.clone();
+
     // rusqlite is sync — run the insert on the blocking pool.
     let db = state.db.clone();
     tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
         let conn = db
             .lock()
             .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
-        db::accounts::upsert(&conn, &account)?;
+        db::accounts::upsert(&conn, &account, &encrypted_refresh_token)?;
         Ok(())
     })
     .await??;
+
+    // Replace any stale entry in the access-token cache for this `sub`.
+    //
+    // This is the load-bearing line for the "I revoked at Google, then
+    // reconnected, but the app keeps showing 401" bug. Without this, the
+    // pre-revocation access_token sits in the cache for up to an hour and
+    // get_access_token() happily returns it on the next Drive call — even
+    // though the cache's notion of expiry is irrelevant once Google has
+    // invalidated it on their side. Reconnecting refreshes the DB row with
+    // a new refresh_token, but the cache also has to be repointed at the
+    // freshly minted access_token from this exchange.
+    {
+        let mut cache = state
+            .token_cache
+            .lock()
+            .map_err(|_| anyhow::anyhow!("token_cache mutex poisoned"))?;
+        cache.insert(
+            sub_for_cache,
+            CachedToken {
+                access_token: access_token.clone(),
+                expires_at: Instant::now() + access_token_expires_in,
+            },
+        );
+    }
 
     // Land back on the home page so the user sees their freshly-connected
     // account in the list.

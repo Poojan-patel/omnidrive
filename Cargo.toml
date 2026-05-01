@@ -25,8 +25,16 @@ oauth2 = "4"
 # HTTP client (for calling Google APIs in M7)
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
-# OS keyring (refresh token storage)
-keyring = "2"
+# Authenticated symmetric encryption for refresh tokens at rest in SQLite.
+# AES-256-GCM with a 12-byte nonce per row; the master key lives in a
+# sibling file (master.key, mode 0600).
+aes-gcm = "0.10"
+
+# CSPRNG for the master key + per-row nonces.
+rand = "0.8"
+
+# Base64 (de)coding — for the optional OMNIDRIVE_MASTER_KEY env override.
+base64 = "0.22"
 
 # Cross-platform config/data directories (XDG on Linux, Application Support on macOS, AppData on Windows)
 directories = "5"
