@@ -1,0 +1,69 @@
+# Gitleaks config for omnidrive.
+#
+# Inherits gitleaks's default ruleset (which covers AWS keys, GitHub tokens,
+# Slack tokens, Stripe keys, GCP service account JSONs, generic API keys,
+# private SSH/PGP keys, ~150 patterns total). The allowlists below are for
+# the handful of placeholders we ship in docs and example configs that
+# would otherwise be flagged as false positives.
+#
+# Tested with: gitleaks v8.18.x
+# Run manually:  gitleaks detect --source . --config .gitleaks.toml --redact
+
+title = "omnidrive secret scanner"
+
+[extend]
+# Pull in the upstream default rules. Without this, only our custom rules
+# run, which would miss the bulk of common secret patterns.
+useDefault = true
+
+# ----------------------------------------------------------------------------
+# Allowlist — paths and regexes whose matches should NOT be reported.
+# Keep this list small and explicit. Each entry should have a comment
+# explaining WHY the value is safe.
+# ----------------------------------------------------------------------------
+[allowlist]
+description = "Documentation placeholders and example values"
+
+# Files that contain only intentional placeholder values.
+# .env.example ships with strings like "paste-your-client-secret-here"
+# which the user is supposed to overwrite with real credentials.
+paths = [
+  '''(?i)\.env\.example$''',
+]
+
+# Generic placeholders we use across docs and example files. If you ever
+# see one of these strings in a real production secret, the secret is
+# malformed — these patterns are all human-readable instructions, not
+# real credential shapes.
+regexes = [
+  '''paste-your-[a-z-]+-here''',
+  '''paste-the-[a-z-]+-here''',
+  '''paste-the-(client-id|client-secret|secret)''',
+  '''GOCSPX-paste-the-secret-here''',
+  '''your-(client-id|token|secret|api-key)''',
+  '''<paste-[a-z-]+>''',
+]
+
+# ----------------------------------------------------------------------------
+# Custom rules — project-specific patterns the upstream defaults miss.
+# Add here as new shapes of credential get introduced.
+# ----------------------------------------------------------------------------
+
+# Catch the OMNIDRIVE_MASTER_KEY env var being committed with a real
+# (32-byte base64) value. The .env.example ships it commented out and
+# blank; if anyone uncomments + fills it in, this should fire.
+[[rules]]
+id = "omnidrive-master-key"
+description = "omnidrive master key (base64-encoded 32 bytes) accidentally committed"
+regex = '''(?i)OMNIDRIVE_MASTER_KEY\s*=\s*["']?[A-Za-z0-9+/]{43}=?["']?'''
+keywords = ["OMNIDRIVE_MASTER_KEY"]
+secretGroup = 0
+
+# Google OAuth refresh tokens (start with "1//"). These would only ever
+# be hit if someone pasted one into a comment or log fixture by mistake.
+[[rules]]
+id = "google-refresh-token"
+description = "Google OAuth refresh token (1//... shape)"
+regex = '''\b1//0[A-Za-z0-9_-]{40,}\b'''
+keywords = ["1//"]
+secretGroup = 0

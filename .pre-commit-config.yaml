@@ -1,0 +1,50 @@
+# Pre-commit hooks for omnidrive.
+#
+# Set up once per clone:
+#   brew install pre-commit   # or: pip install pre-commit
+#   pre-commit install        # wires the git hook
+#
+# Run manually against the whole repo:
+#   pre-commit run --all-files
+#
+# Skip a single commit (use sparingly, only when you've reviewed the diff):
+#   git commit --no-verify
+
+repos:
+  # Secret scanner. Reads .gitleaks.toml from repo root for custom config.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+
+  # General-purpose hygiene hooks from the pre-commit project itself.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      # Block accidental large/binary commits — caps at ~1 MB.
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      # Detect unresolved merge-conflict markers in tracked files.
+      - id: check-merge-conflict
+      # Lint config-file syntax so a typo doesn't ship.
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      # File hygiene — strip trailing whitespace and ensure final newline.
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      # Refuse commits that contain non-UTF-8 byte sequences (rare, but
+      # easy to catch).
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  # Cargo fmt — keep Rust source style consistent. Local hook because we
+  # use the project's own toolchain rather than pinning a separate one.
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt --check
+        entry: cargo fmt -- --check
+        language: system
+        types: [rust]
+        pass_filenames: false

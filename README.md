@@ -103,6 +103,32 @@ templates/
   _file_list.html      file table partial
 ```
 
+## Development
+
+### Pre-commit hooks (secret scanning + hygiene)
+
+This repo ships a [pre-commit](https://pre-commit.com) config that runs [gitleaks](https://github.com/gitleaks/gitleaks) and a few hygiene checks on every commit. Set it up once per clone:
+
+```bash
+brew install pre-commit       # or: pip install pre-commit
+pre-commit install            # wires the git hook
+```
+
+That's it — every `git commit` will now run gitleaks against the staged diff before the commit lands. If gitleaks finds something that looks like a credential, the commit is rejected and you see the offending line + the rule that fired.
+
+To scan the entire repo manually (handy after you first install, or after editing `.gitleaks.toml`):
+
+```bash
+pre-commit run --all-files
+```
+
+Custom config lives in `.gitleaks.toml`. The allowlist there carves out the placeholder strings we ship in `.env.example` and the docs (e.g. `paste-your-client-secret-here`) so they don't generate false positives. Two project-specific custom rules also catch:
+
+- `OMNIDRIVE_MASTER_KEY=<32-byte base64>` accidentally committed
+- Google refresh tokens (the `1//0…` shape)
+
+If you ever need to commit something gitleaks doesn't like and you've reviewed it, `git commit --no-verify` skips the hook for one commit. Use sparingly.
+
 ## Threat model (honest version)
 
 omnidrive's encryption defends against **accidental** exposure of the SQLite file — backup tarballs, screenshots, an accidental `git add data/`, etc. The encrypted blob alone is useless without `master.key`.
