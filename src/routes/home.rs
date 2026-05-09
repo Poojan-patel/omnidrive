@@ -14,7 +14,7 @@ use tokio::task::JoinSet;
 use crate::db;
 use crate::drive::{self, FileWithSource};
 use crate::error::AppError;
-use crate::models::Account;
+use crate::models::{Account, SourceAccount};
 use crate::oauth;
 use crate::state::AppState;
 
@@ -86,14 +86,17 @@ pub(crate) async fn fan_out(
         FetchMode::Search(q) => Some(q.to_string()),
     };
 
-    let mut set: JoinSet<(String, String, anyhow::Result<Vec<drive::DriveFile>>)> = JoinSet::new();
+    // Spawn one task per account. We carry the whole Account into the result
+    // tuple so a successful task can attach it to each FileWithSource (for
+    // avatar/name rendering in the Location column), and a failed task can
+    // still report which account failed by email.
+    let mut set: JoinSet<(Account, anyhow::Result<Vec<drive::DriveFile>>)> = JoinSet::new();
     for account in accounts {
         let state_clone = state.clone();
+        let account_clone = account.clone();
         let sub = account.sub.clone();
-        let email = account.email.clone();
         let query_clone = query_owned.clone();
         set.spawn(async move {
-            // Capture sub+email so a failed result still tells us who failed.
             let result = async {
                 let token = oauth::get_access_token(&state_clone, &sub).await?;
                 match query_clone {
@@ -102,7 +105,7 @@ pub(crate) async fn fan_out(
                 }
             }
             .await;
-            (sub, email, result)
+            (account_clone, result)
         });
     }
 
@@ -111,20 +114,22 @@ pub(crate) async fn fan_out(
 
     while let Some(joined) = set.join_next().await {
         match joined {
-            Ok((sub, email, Ok(files))) => {
+            Ok((account, Ok(files))) => {
+                // Project Account -> SourceAccount once per task; each file
+                // for this account just clones the small projection.
+                let source: SourceAccount = (&account).into();
                 let with_source: Vec<FileWithSource> = files
                     .into_iter()
                     .map(|f| FileWithSource {
                         file: f,
-                        account_email: email.clone(),
-                        account_sub: sub.clone(),
+                        account: source.clone(),
                     })
                     .collect();
                 per_account.push(with_source);
             }
-            Ok((_sub, email, Err(e))) => {
-                tracing::warn!(email = %email, error = ?e, "Drive fetch failed for account");
-                failed.push(email);
+            Ok((account, Err(e))) => {
+                tracing::warn!(email = %account.email, error = ?e, "Drive fetch failed for account");
+                failed.push(account.email);
             }
             Err(join_err) => {
                 tracing::error!(error = ?join_err, "Drive fetch task panicked");

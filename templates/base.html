@@ -6,6 +6,11 @@
   <title>{% block title %}omnidrive{% endblock %}</title>
   <!-- HTMX from CDN for now; we'll vendor it locally as a polish item later. -->
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <!-- Space Grotesk for the brand wordmark. preconnect cuts ~100ms off the
+       handshake; display=swap keeps text visible while fonts load. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
   <style>
     /* ---------- reset + tokens ---------- */
     *, *::before, *::after { box-sizing: border-box; }
@@ -97,13 +102,16 @@
       align-items: center;
       gap: var(--space-3);
     }
-    .logo svg { width: 28px; height: 28px; flex-shrink: 0; }
+    .logo svg { width: 32px; height: 32px; flex-shrink: 0; }
     .logo .brand {
-      font-size: 18px;
-      font-weight: 500;
-      letter-spacing: -0.01em;
-      color: var(--color-text);
+      font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      line-height: 1;
     }
+    .logo .brand-omni { color: var(--color-accent); }
+    .logo .brand-rest { color: var(--color-text); }
 
     /* ---------- sidebar ---------- */
     .sidebar {
@@ -218,6 +226,7 @@
       background: var(--color-bg-hover);
       flex-shrink: 0;
     }
+    .avatar-xs { width: 22px; height: 22px; }
     .avatar-sm { width: 28px; height: 28px; }
     .avatar-lg { width: 40px; height: 40px; }
     .avatar-placeholder {
@@ -229,6 +238,7 @@
       font-weight: 600;
       font-size: 13px;
     }
+    .avatar-xs.avatar-placeholder { font-size: 11px; }
     .avatar-lg.avatar-placeholder { font-size: 16px; }
 
     /* ---------- buttons ---------- */
@@ -366,6 +376,11 @@
       width: 100%;
       border-collapse: collapse;
       font-size: 14px;
+      /* Honor the declared column widths so long unbroken filenames truncate
+         in the Name column instead of pushing Location and Last modified
+         off-grid. The .file-name-link / .location-chip rules already have
+         the ellipsis machinery — fixed layout is what makes it activate. */
+      table-layout: fixed;
     }
     .file-list thead th {
       text-align: left;
@@ -408,6 +423,8 @@
     .type-badge.type-folder { color: #f9ab00; }
     .type-badge.type-folder svg { color: #f9ab00; }
     .type-badge.type-file svg { color: var(--color-text-muted); }
+    .type-badge.type-shortcut { color: #1a73e8; }
+    .type-badge.type-shortcut svg { color: #1a73e8; }
 
     .file-name-link {
       color: var(--color-text);
@@ -424,19 +441,23 @@
       text-decoration: underline;
     }
 
-    .location-chip {
-      display: inline-block;
+    /* Location cell: avatar + display name (or email fallback). The
+       outer flex container provides the alignment; min-width:0 lets the
+       inner name truncate when the column is narrow. */
+    .location-account {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
       max-width: 100%;
+    }
+    .location-account .avatar { flex-shrink: 0; }
+    .location-name {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      padding: 2px 10px;
-      background: var(--color-accent-soft);
-      color: var(--color-accent-hover);
-      border-radius: var(--radius-pill);
-      font-size: 12px;
-      font-weight: 500;
-      vertical-align: middle;
+      font-size: 13px;
+      color: var(--color-text);
     }
   </style>
 </head>
@@ -444,12 +465,13 @@
   <div class="app">
     <header class="header">
       <a class="logo" href="/" aria-label="omnidrive home">
-        <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <circle cx="11" cy="13" r="8" fill="#1a73e8" opacity="0.85"/>
-          <circle cx="21" cy="13" r="8" fill="#34a853" opacity="0.75"/>
-          <circle cx="16" cy="22" r="8" fill="#fbbc04" opacity="0.7"/>
+        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M 6 22 L 6 18 a 2 2 0 0 1 2 -2 L 22 16 a 2 2 0 0 1 1.6 0.8 L 26 20 L 56 20 a 2 2 0 0 1 2 2 L 58 28 L 6 28 Z" fill="#185fa5"/>
+          <path d="M 6 26 L 58 26 L 56 52 a 2 2 0 0 1 -2 2 L 10 54 a 2 2 0 0 1 -2 -2 Z" fill="#1a73e8"/>
+          <path d="M 18 38 C 18 32, 24 29, 32 38 C 40 47, 46 44, 46 38" fill="none" stroke="#ffffff" stroke-width="3.4" stroke-linecap="round"/>
+          <path d="M 46 38 C 46 32, 40 29, 32 38 C 24 47, 18 44, 18 38" fill="none" stroke="#5dcaa5" stroke-width="3.4" stroke-linecap="round"/>
         </svg>
-        <span class="brand">omnidrive</span>
+        <span class="brand"><span class="brand-omni">omni</span><span class="brand-rest">drive</span></span>
       </a>
     </header>
     {% block content %}{% endblock %}

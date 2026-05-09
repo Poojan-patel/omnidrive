@@ -58,10 +58,14 @@ impl DriveFile {
         self.mime_type == "application/vnd.google-apps.folder"
     }
 
+    pub fn is_shortcut(&self) -> bool {
+        self.mime_type == "application/vnd.google-apps.shortcut"
+    }
+
     pub fn type_label(&self) -> &'static str {
         if self.is_folder() {
             "Folder"
-        } else {
+        }  else {
             "File"
         }
     }
@@ -122,11 +126,15 @@ fn mtime_key(f: &DriveFile) -> &str {
 /// One file annotated with the account it came from. The route handlers
 /// build these so the rendered file list can show "Location" (which drive)
 /// alongside the file metadata.
+///
+/// We deliberately use `SourceAccount` (a display-only projection) rather
+/// than the full `Account` — the file list needs the avatar/email/name and
+/// nothing else, so we don't carry `sub`, timestamps, or status into the
+/// rendering layer.
 #[derive(Debug, Clone)]
 pub struct FileWithSource {
     pub file: DriveFile,
-    pub account_email: String,
-    pub account_sub: String,
+    pub account: crate::models::SourceAccount,
 }
 
 #[derive(Deserialize)]
@@ -178,7 +186,6 @@ async fn fetch(access_token: &str, q: &str, op: &'static str) -> Result<Vec<Driv
         let body = resp.text().await.unwrap_or_default();
         anyhow::bail!("Drive {op} returned {status}: {body}");
     }
-
     let parsed: FileListResponse = resp
         .json()
         .await
@@ -285,10 +292,14 @@ mod tests {
         }
     }
     fn fws(name: &str, mtime: &str, email: &str) -> FileWithSource {
+        use crate::models::SourceAccount;
         FileWithSource {
             file: f(name, mtime),
-            account_email: email.to_string(),
-            account_sub: format!("sub-{email}"),
+            account: SourceAccount {
+                email: email.to_string(),
+                name: None,
+                picture_url: None,
+            },
         }
     }
 
